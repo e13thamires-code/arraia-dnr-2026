@@ -1,0 +1,51 @@
+==========================================================
+ REGRAS DO ARRAIÁ — para ADICIONAR (não apagar as suas!)
+==========================================================
+
+Link do editor de regras (abre no projeto casa-tha):
+https://console.firebase.google.com/project/casa-tha/firestore/rules
+
+Você vai ver algo assim (suas regras atuais):
+
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+
+        ... (as SUAS regras já existentes ficam aqui) ...
+
+      }
+    }
+
+COLE o bloco abaixo DENTRO das chaves de
+"match /databases/{database}/documents {", junto com o que já existe
+(pode colar logo depois daquela linha). NÃO apague o resto.
+
+------------------------- COLE ISTO -------------------------
+
+    // === Arraiá DNR 2026 (libera só a coleção do arraiá) ===
+    match /arraia2026/{document=**} {
+      allow read, write: if request.time < timestamp.date(2026, 8, 31);
+    }
+
+-------------------------------------------------------------
+
+Depois clique em "Publicar" (Publish).
+
+Ficará parecido com isto (exemplo):
+
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+
+        // suas regras antigas continuam aqui...
+
+        // === Arraiá DNR 2026 (libera só a coleção do arraiá) ===
+        match /arraia2026/{document=**} {
+          allow read, write: if request.time < timestamp.date(2026, 8, 31);
+        }
+
+      }
+    }
+
+Pronto! Só a "gaveta" arraia2026 fica liberada; o resto do casa-tha
+continua protegido pelas suas regras de sempre.

@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "arraia-dnr-2026",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
