@@ -405,7 +405,7 @@ const firebaseConfig = {
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, addDoc, deleteDoc, doc, setDoc,
+  getFirestore, collection, addDoc, deleteDoc, doc, setDoc, updateDoc,
   onSnapshot, query, orderBy, serverTimestamp,
   increment, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -433,6 +433,7 @@ const VOTE_META = {
 // estado local (espelho do Firestore)
 let guests = [], games = [], songs = [], messages = [], votes = {}, needs = {};
 let myVote = localStorage.getItem('arraiaMyVote') || null;
+let editing = null; // { kind: 'guest'|'message'|'game'|'song', id } enquanto alguém edita
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -546,6 +547,45 @@ async function claimNeed(id) {
 }
 const removeNeed = (id, name) => db && setDoc(metaDoc('needs'), { [id]: arrayRemove(name) }, { merge:true });
 
+// ---------- edição (corrigir/trocar o que a pessoa escreveu) ----------
+function rerenderFor(kind) {
+  if (kind === 'guest') renderGuests();
+  else if (kind === 'message') renderMessages();
+  else if (kind === 'game') renderGames();
+  else if (kind === 'song') renderSongs();
+}
+function startEdit(kind, id) { editing = { kind, id }; rerenderFor(kind); }
+function cancelEdit() { const k = editing && editing.kind; editing = null; if (k) rerenderFor(k); }
+const EINP = "width:100%; font-family:'Nunito'; font-weight:700; font-size:14px; color:#3a2414; background:#f7eccb; border:2px solid #c9a85f; border-radius:10px; padding:8px 10px;";
+const EBTN_SAVE = "font-family:'Nunito'; font-weight:800; font-size:13px; color:#fffdf5; background:#5e9c3f; border:none; border-radius:18px; padding:7px 16px; box-shadow:0 3px 0 #3f6e29; cursor:pointer;";
+const EBTN_CANCEL = "font-family:'Nunito'; font-weight:800; font-size:13px; color:#6b4423; background:#eee3c4; border:none; border-radius:18px; padding:7px 14px; cursor:pointer;";
+const editBtn = (kind, id) => `<button data-act="edit${kind[0].toUpperCase()+kind.slice(1)}" data-id="${esc(id)}" title="editar" style="border:none; background:none; cursor:pointer; color:#2b86b0; font-size:15px; line-height:1; padding:0 2px;">✎</button>`;
+
+async function saveGuest(id) {
+  const nome = $('e_nome').value.trim();
+  const sobrenome = $('e_sobrenome').value.trim();
+  const bebida = $('e_bebida').value.trim();
+  const doce = $('e_doce').value.trim();
+  const salgado = $('e_salgado').value.trim();
+  if (!nome || !sobrenome || !db) return;
+  editing = null; renderGuests();
+  await updateDoc(gdoc('guests', id), { nome, sobrenome, bebida, doce, salgado });
+}
+async function saveMessage(id) {
+  const nome = $('e_nome').value.trim();
+  const text = $('e_text').value.trim();
+  if (!nome || !text || !db) return;
+  editing = null; renderMessages();
+  await updateDoc(gdoc('messages', id), { nome, text });
+}
+async function saveChip(kind, id) {
+  const text = $('e_text').value.trim();
+  if (!text || !db) return;
+  const col = kind === 'game' ? 'games' : 'songs';
+  editing = null; rerenderFor(kind);
+  await updateDoc(gdoc(col, id), { text });
+}
+
 // ---------- renderização ----------
 function renderGuests() {
   const wrap = $('guestsWrap');
@@ -555,6 +595,21 @@ function renderGuests() {
     return;
   }
   const cards = guests.map(g => {
+    if (editing && editing.kind === 'guest' && editing.id === g.id) {
+      return `<div style="background:#fffdf5; border:3px solid #2b86b0; border-radius:16px; padding:15px 16px; box-shadow:0 5px 0 rgba(0,0,0,.16);">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input id="e_nome" value="${esc(g.nome)}" placeholder="Nome" style="${EINP}">
+          <input id="e_sobrenome" value="${esc(g.sobrenome)}" placeholder="Sobrenome" style="${EINP}">
+        </div>
+        <input id="e_bebida" value="${esc(g.bebida||'')}" placeholder="Bebida" style="${EINP} margin-top:8px;">
+        <input id="e_doce" value="${esc(g.doce||'')}" placeholder="Prato de doce" style="${EINP} margin-top:8px;">
+        <input id="e_salgado" value="${esc(g.salgado||'')}" placeholder="Prato salgado" style="${EINP} margin-top:8px;">
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
+          <button data-act="cancelEdit" style="${EBTN_CANCEL}">Cancelar</button>
+          <button data-act="saveGuest" data-id="${esc(g.id)}" style="${EBTN_SAVE}">Salvar</button>
+        </div>
+      </div>`;
+    }
     const first = (g.nome||'').trim().toLowerCase();
     const full = ((g.nome||'')+' '+(g.sobrenome||'')).trim().toLowerCase();
     const leva = NEED_ITEMS.filter(it => (needs[it.id]||[]).some(n => {
@@ -567,7 +622,7 @@ function renderGuests() {
     return `<div style="background:#fffdf5; border:3px solid #6b4423; border-radius:16px; padding:15px 16px; box-shadow:0 5px 0 rgba(0,0,0,.16); animation:pop .25s ease;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
         <div style="font-family:'Nunito'; font-weight:900; font-size:18px; color:#6b4423; line-height:1.1;">${esc(g.nome)} ${esc(g.sobrenome)}</div>
-        <button data-act="removeGuest" data-id="${esc(g.id)}" title="remover" style="border:none; background:none; cursor:pointer; color:#c9a85f; font-size:18px; font-weight:900; line-height:1;">×</button>
+        <div style="display:flex; align-items:center; gap:4px; flex:none;">${editBtn('guest', g.id)}<button data-act="removeGuest" data-id="${esc(g.id)}" title="remover" style="border:none; background:none; cursor:pointer; color:#c9a85f; font-size:18px; font-weight:900; line-height:1;">×</button></div>
       </div>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
         <span style="display:inline-flex; align-items:center; gap:7px; font-weight:700; font-size:13px; color:#2b86b0;"><span style="width:9px;height:9px;border-radius:50%;background:#2b86b0;display:inline-block;"></span>${esc(bebida)}</span>
@@ -597,26 +652,34 @@ function renderNeeds() {
   }).join('');
 }
 
-function chipList(items, color, shadow, act) {
+function chipList(items, kind, color, shadow) {
   if (!items.length) return null;
-  return items.map(it =>
-    `<div style="display:flex; align-items:center; gap:10px; background:#fffdf5; border:3px solid ${color}; border-radius:30px; padding:10px 16px 10px 14px; box-shadow:0 4px 0 ${shadow}; animation:pop .25s ease;">
+  const K = kind[0].toUpperCase() + kind.slice(1);
+  return items.map(it => {
+    if (editing && editing.kind === kind && editing.id === it.id) {
+      return `<div style="display:flex; align-items:center; gap:6px; background:#fffdf5; border:3px solid ${color}; border-radius:30px; padding:7px 8px 7px 12px; box-shadow:0 4px 0 ${shadow};">
+        <input id="e_text" value="${esc(it.text)}" style="font-family:'Nunito'; font-weight:800; font-size:15px; color:#6b4423; background:#f7eccb; border:2px solid #c9a85f; border-radius:16px; padding:5px 10px; min-width:150px;">
+        <button data-act="save${K}" data-id="${esc(it.id)}" style="${EBTN_SAVE}">Salvar</button>
+        <button data-act="cancelEdit" style="${EBTN_CANCEL}">Cancelar</button>
+      </div>`;
+    }
+    return `<div style="display:flex; align-items:center; gap:8px; background:#fffdf5; border:3px solid ${color}; border-radius:30px; padding:10px 14px 10px 14px; box-shadow:0 4px 0 ${shadow}; animation:pop .25s ease;">
       <span style="width:10px; height:10px; background:${color}; border-radius:50%; display:inline-block;"></span>
       <span style="font-weight:800; font-size:16px; color:#6b4423;">${esc(it.text)}</span>
-      <button data-act="${act}" data-id="${esc(it.id)}" style="border:none; background:none; cursor:pointer; color:#d3b683; font-size:18px; font-weight:900; line-height:1;">×</button>
-    </div>`
-  ).join('');
+      ${editBtn(kind, it.id)}<button data-act="remove${K}" data-id="${esc(it.id)}" style="border:none; background:none; cursor:pointer; color:#d3b683; font-size:18px; font-weight:900; line-height:1;">×</button>
+    </div>`;
+  }).join('');
 }
 
 function renderGames() {
-  const list = chipList(games, '#e87b1c', 'rgba(232,123,28,.3)', 'removeGame');
+  const list = chipList(games, 'game', '#e87b1c', 'rgba(232,123,28,.3)');
   $('gamesWrap').innerHTML = list
     ? `<div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center;">${list}</div>`
     : '<div style="text-align:center; color:#9c7b45; font-family:\'Caveat\',cursive; font-size:24px; font-weight:600;">Sem ideias ainda — solta a criatividade caipira! 🎯</div>';
 }
 
 function renderSongs() {
-  const list = chipList(songs, '#e87b1c', 'rgba(232,123,28,.3)', 'removeSong');
+  const list = chipList(songs, 'song', '#e87b1c', 'rgba(232,123,28,.3)');
   $('songsWrap').innerHTML = list
     ? `<div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center;">${list}</div>`
     : '<div style="text-align:center; color:#9c7b45; font-family:\'Caveat\',cursive; font-size:24px; font-weight:600;">Bora começar a playlist — manda a primeira música! 🪗</div>';
@@ -627,16 +690,26 @@ function renderMessages() {
     $('messagesWrap').innerHTML = '<div style="text-align:center; background:rgba(255,253,245,.18); border:3px dashed #fffdf5; border-radius:16px; padding:30px 18px; color:#fffdf5; font-family:\'Caveat\',cursive; font-size:24px; font-weight:600;">Ainda sem recados… deixa o primeiro aí! ✍️</div>';
     return;
   }
-  const cards = messages.map(m =>
-    `<div style="background:#fffdf5; border:3px solid #b85f12; border-radius:16px; padding:15px 16px; box-shadow:0 5px 0 rgba(0,0,0,.16); animation:pop .25s ease;">
+  const cards = messages.map(m => {
+    if (editing && editing.kind === 'message' && editing.id === m.id) {
+      return `<div style="background:#fffdf5; border:3px solid #2b86b0; border-radius:16px; padding:15px 16px; box-shadow:0 5px 0 rgba(0,0,0,.16);">
+        <input id="e_nome" value="${esc(m.nome)}" placeholder="Seu nome" style="${EINP} margin-bottom:8px;">
+        <textarea id="e_text" rows="3" placeholder="Seu recado" style="${EINP} resize:vertical;">${esc(m.text)}</textarea>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
+          <button data-act="cancelEdit" style="${EBTN_CANCEL}">Cancelar</button>
+          <button data-act="saveMessage" data-id="${esc(m.id)}" style="${EBTN_SAVE}">Salvar</button>
+        </div>
+      </div>`;
+    }
+    return `<div style="background:#fffdf5; border:3px solid #b85f12; border-radius:16px; padding:15px 16px; box-shadow:0 5px 0 rgba(0,0,0,.16); animation:pop .25s ease;">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
         <span style="display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; background:#d6402c; color:#fffdf5; font-family:'Rye',serif; font-size:16px; border-radius:50%;">${esc((m.nome[0]||'?').toUpperCase())}</span>
         <span style="font-family:'Nunito'; font-weight:900; font-size:16px; color:#6b4423;">${esc(m.nome)}</span>
-        <button data-act="removeMessage" data-id="${esc(m.id)}" style="margin-left:auto; border:none; background:none; cursor:pointer; color:#d3b683; font-size:18px; font-weight:900; line-height:1;">×</button>
+        <span style="margin-left:auto; display:flex; align-items:center; gap:4px;">${editBtn('message', m.id)}<button data-act="removeMessage" data-id="${esc(m.id)}" style="border:none; background:none; cursor:pointer; color:#d3b683; font-size:18px; font-weight:900; line-height:1;">×</button></span>
       </div>
       <p style="margin:0; font-weight:600; font-size:15px; color:#3a2414; line-height:1.4;">${esc(m.text)}</p>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
   $('messagesWrap').innerHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px;">${cards}</div>`;
 }
 
@@ -758,6 +831,15 @@ document.body.addEventListener('click', e => {
   else if (act === 'vote') vote(id);
   else if (act === 'claimNeed') claimNeed(id);
   else if (act === 'removeNeed') removeNeed(id, decodeURIComponent(btn.dataset.name));
+  else if (act === 'editGuest') startEdit('guest', id);
+  else if (act === 'saveGuest') saveGuest(id);
+  else if (act === 'editMessage') startEdit('message', id);
+  else if (act === 'saveMessage') saveMessage(id);
+  else if (act === 'editGame') startEdit('game', id);
+  else if (act === 'saveGame') saveChip('game', id);
+  else if (act === 'editSong') startEdit('song', id);
+  else if (act === 'saveSong') saveChip('song', id);
+  else if (act === 'cancelEdit') cancelEdit();
 });
 
 // render inicial (vazio) enquanto o Firestore não responde
